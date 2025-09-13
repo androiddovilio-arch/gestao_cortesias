@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestão de Cortesias - SESC Araraquara</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Chosen Palette: Warm Neutral Tones -->
+    <!-- Application Structure Plan: A task-oriented SPA dashboard with three main views: Dashboard (overview stats and chart), Eventos (list and details with guest management), and Relatórios (filterable table with CSV export). This structure mirrors the user's workflow for managing courtesies, making it intuitive. Modals are used for data entry to maintain context and avoid page reloads, creating a fluid user experience. The addition of a confirmation modal for deletion further enhances user safety and control. -->
+    <!-- Visualization & Content Choices: 
+        - Report Info: General statistics (total events, guests). Goal: Inform. Viz/Method: "Stat Cards" using styled HTML/Tailwind. Interaction: None. Justification: Provides a quick, scannable overview of the system's state.
+        - Report Info: Number of guests per event. Goal: Compare. Viz/Method: Bar Chart. Interaction: Hover tooltips. Justification: Visually highlights which events are most popular or have the most courtesies assigned. Library: Chart.js (Canvas).
+        - Report Info: List of events and guests. Goal: Organize. Viz/Method: Interactive HTML Tables. Interaction: Selection (for events), Filtering (for reports), and Deletion (with confirmation). Justification: Standard and effective way to display and manage structured data with an added safety feature for data removal.
+        - Report Info: Data entry for events/guests. Goal: Input. Viz/Method: Modals with forms. Interaction: Form submission. Justification: Allows data entry without losing the main application context.
+        - Report Info: Full report generation. Goal: Export. Viz/Method: HTML Table to CSV. Interaction: Button click. Justification: Fulfills a core user requirement to get data out of the system in a usable format. Method: Vanilla JS.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .chart-container { position: relative; width: 100%; max-width: 800px; margin-left: auto; margin-right: auto; height: 350px; max-height: 40vh; }
+        .modal-backdrop {
+            transition: opacity 0.3s ease;
+        }
+        .modal-content {
+            transition: transform 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-stone-50 text-stone-800">
+
+    <div id="app" class="min-h-screen flex flex-col">
+
+        <header class="bg-white shadow-sm sticky top-0 z-20">
+            <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex items-center justify-between h-16">
+                    <div class="flex items-center space-x-4">
+                        <span class="text-xl font-bold text-orange-600">Sesc Araraquara</span>
+                        <span class="text-xl font-semibold text-stone-700">Gestão de Cortesias - Secretaria Geral</span>
+                    </div>
+                    <nav class="hidden md:flex items-center space-x-2">
+                        <button data-view="dashboard" class="nav-link bg-orange-100 text-orange-700 font-semibold py-2 px-4 rounded-md">Dashboard</button>
+                        <button data-view="events" class="nav-link text-stone-600 hover:bg-stone-100 font-semibold py-2 px-4 rounded-md">Eventos</button>
+                        <button data-view="reports" class="nav-link text-stone-600 hover:bg-stone-100 font-semibold py-2 px-4 rounded-md">Relatórios</button>
+                    </nav>
+                     <div class="md:hidden">
+                        <select id="mobile-nav" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 sm:text-sm">
+                            <option value="dashboard" selected>Dashboard</option>
+                            <option value="events">Eventos</option>
+                            <option value="reports">Relatórios</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-grow container mx-auto p-4 sm:p-6 lg:p-8">
+            
+            <!-- Dashboard View -->
+            <div id="dashboard-view" class="view space-y-8">
+                <div>
+                    <h1 class="text-3xl font-bold text-stone-800">Dashboard</h1>
+                    <p class="mt-1 text-stone-500">Visão geral do sistema de cortesias.</p>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-stone-200">
+                        <h3 class="text-sm font-medium text-stone-500">Total de Eventos</h3>
+                        <p id="total-events-stat" class="mt-2 text-3xl font-bold text-orange-600">0</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-stone-200">
+                        <h3 class="text-sm font-medium text-stone-500">Cortesias Emitidas</h3>
+                        <p id="total-guests-stat" class="mt-2 text-3xl font-bold text-cyan-600">0</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-stone-200">
+                        <h3 class="text-sm font-medium text-stone-500">Eventos Ativos</h3>
+                        <p id="active-events-stat" class="mt-2 text-3xl font-bold text-emerald-600">0</p>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-stone-200">
+                     <h2 class="text-xl font-semibold mb-4 text-stone-700">Cortesias por Evento</h2>
+                    <div class="chart-container">
+                        <canvas id="eventsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Events View -->
+            <div id="events-view" class="view hidden space-y-6">
+                 <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                    <div>
+                        <h1 class="text-3xl font-bold text-stone-800">Gerenciamento de Eventos</h1>
+                        <p class="mt-1 text-stone-500">Adicione, visualize e gerencie eventos e seus convidados.</p>
+                    </div>
+                    <button id="add-event-btn" class="w-full sm:w-auto bg-orange-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-orange-700 transition-colors">
+                        + Adicionar Evento
+                    </button>
+                </div>
+                <div id="event-details-section" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-1 bg-white rounded-lg shadow-sm border border-stone-200 p-4 self-start">
+                         <h2 class="text-lg font-semibold text-stone-700 mb-3">Lista de Eventos</h2>
+                        <div id="events-list" class="space-y-2 max-h-[60vh] overflow-y-auto"></div>
+                    </div>
+                    <div id="selected-event-details" class="lg:col-span-2 space-y-4 hidden">
+                         <div class="bg-white rounded-lg shadow-sm border border-stone-200 p-6">
+                            <h2 id="event-title" class="text-2xl font-bold text-orange-700"></h2>
+                            <div class="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+                                <div>
+                                    <p class="font-semibold text-stone-600">Data e Horário</p>
+                                    <p id="event-date" class="text-stone-800"></p>
+                                </div>
+                                <div>
+                                    <p class="font-semibold text-stone-600">Local</p>
+                                    <p id="event-location" class="text-stone-800"></p>
+                                </div>
+                                <div>
+                                    <p class="font-semibold text-stone-600">Status</p>
+                                    <p id="event-status" class="font-mono text-xs"></p>
+                                </div>
+                                <div class="col-span-2 sm:col-span-1">
+                                    <p class="font-semibold text-stone-600">Cortesias</p>
+                                    <p id="event-courtesies" class="text-stone-800"></p>
+                                </div>
+                            </div>
+                         </div>
+                         <div class="bg-white rounded-lg shadow-sm border border-stone-200 p-6">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-xl font-semibold text-stone-700">Convidados</h3>
+                                <button id="add-guest-btn" class="bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-cyan-700 transition-colors">
+                                + Adicionar Convidado
+                                </button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-stone-200">
+                                    <thead class="bg-stone-50">
+                                        <tr>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Nome</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Email</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="guests-table-body" class="bg-white divide-y divide-stone-200">
+                                    </tbody>
+                                </table>
+                            </div>
+                         </div>
+                    </div>
+                    <div id="no-event-selected" class="lg:col-span-2 flex items-center justify-center bg-white rounded-lg border-2 border-dashed border-stone-300 h-96">
+                        <p class="text-stone-500">Selecione um evento para ver os detalhes.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reports View -->
+            <div id="reports-view" class="view hidden space-y-6">
+                <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                    <div>
+                        <h1 class="text-3xl font-bold text-stone-800">Relatórios</h1>
+                        <p class="mt-1 text-stone-500">Filtre e exporte os dados de cortesias.</p>
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+                        <button id="export-pdf-btn" class="w-full sm:w-auto bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700 transition-colors">
+                            Exportar para PDF
+                        </button>
+                    </div>
+                </div>
+                 <div class="bg-white rounded-lg shadow-sm border border-stone-200 p-6">
+                    <div class="mb-4">
+                        <label for="report-event-filter" class="block text-sm font-medium text-stone-700">Filtrar por Evento</label>
+                        <select id="report-event-filter" class="mt-1 block w-full sm:w-1/3 rounded-md border-stone-300 shadow-sm focus:border-orange-500 focus:ring-orange-500"></select>
+                    </div>
+                     <div class="overflow-x-auto">
+                        <table id="report-table" class="min-w-full divide-y divide-stone-200">
+                            <thead class="bg-stone-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Evento</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Data</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Convidado</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">CPF</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Email</th>
+                                </tr>
+                            </thead>
+                            <tbody id="report-table-body" class="bg-white divide-y divide-stone-200"></tbody>
+                        </table>
+                    </div>
+                 </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Event Modal -->
+    <div id="event-modal" class="fixed inset-0 bg-black bg-opacity-50 z-30 hidden items-center justify-center p-4 modal-backdrop">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6 modal-content scale-95">
+            <h2 class="text-2xl font-bold mb-4">Adicionar Novo Evento</h2>
+            <form id="event-form">
+                <div class="space-y-4">
+                    <div>
+                        <label for="eventName" class="block text-sm font-medium text-stone-700">Nome do Evento</label>
+                        <input type="text" id="eventName" required class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label for="eventDate" class="block text-sm font-medium text-stone-700">Data</label>
+                        <input type="date" id="eventDate" required class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                    </div>
+                     <div>
+                        <label for="eventTime" class="block text-sm font-medium text-stone-700">Horário</label>
+                        <input type="time" id="eventTime" required class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                    </div>
+                     <div>
+                        <label for="eventLocation" class="block text-sm font-medium text-stone-700">Local</label>
+                        <input type="text" id="eventLocation" required class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label for="eventStatusSelect" class="block text-sm font-medium text-stone-700">Status</label>
+                        <select id="eventStatusSelect" class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                            <option value="ATIVO">Ativo</option>
+                            <option value="FINALIZADO">Finalizado</option>
+                            <option value="CANCELADO">Cancelado</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="eventCourtesiesLimit" class="block text-sm font-medium text-stone-700">Limite de Cortesias</label>
+                        <input type="number" id="eventCourtesiesLimit" required class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-orange-500 focus:ring-orange-500" min="0">
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-end space-x-3">
+                    <button type="button" id="cancel-event-modal" class="bg-stone-200 text-stone-700 font-bold py-2 px-4 rounded-lg hover:bg-stone-300">Cancelar</button>
+                    <button type="submit" class="bg-orange-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-orange-700">Salvar Evento</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Status Modal -->
+    <div id="edit-status-modal" class="fixed inset-0 bg-black bg-opacity-50 z-30 hidden items-center justify-center p-4 modal-backdrop">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6 modal-content scale-95">
+            <h2 class="text-2xl font-bold mb-4">Editar Status do Evento</h2>
+            <form id="edit-status-form">
+                <input type="hidden" id="editStatusEventId">
+                <div class="space-y-4">
+                    <div>
+                        <label for="editEventStatusSelect" class="block text-sm font-medium text-stone-700">Novo Status</label>
+                        <select id="editEventStatusSelect" required class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                            <option value="ATIVO">Ativo</option>
+                            <option value="FINALIZADO">Finalizado</option>
+                            <option value="CANCELADO">Cancelado</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-end space-x-3">
+                    <button type="button" id="cancel-edit-status-modal" class="bg-stone-200 text-stone-700 font-bold py-2 px-4 rounded-lg hover:bg-stone-300">Cancelar</button>
+                    <button type="submit" class="bg-orange-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-orange-700">Salvar Status</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Guest Modal -->
+    <div id="guest-modal" class="fixed inset-0 bg-black bg-opacity-50 z-30 hidden items-center justify-center p-4 modal-backdrop">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6 modal-content scale-95">
+            <h2 class="text-2xl font-bold mb-4">Adicionar Convidado</h2>
+            <form id="guest-form">
+                <input type="hidden" id="guestEventId">
+                <div class="space-y-4">
+                    <div>
+                        <label for="guestName" class="block text-sm font-medium text-stone-700">Nome do Convidado</label>
+                        <input type="text" id="guestName" required class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-cyan-500 focus:ring-cyan-500">
+                    </div>
+                    <div>
+                        <label for="guestCPF" class="block text-sm font-medium text-stone-700">CPF</label>
+                        <input type="text" id="guestCPF" required class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-cyan-500 focus:ring-cyan-500">
+                    </div>
+                    <div>
+                        <label for="guestEmail" class="block text-sm font-medium text-stone-700">Email</label>
+                        <input type="email" id="guestEmail" class="mt-1 block w-full rounded-md border-stone-300 shadow-sm focus:border-cyan-500 focus:ring-cyan-500">
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-end space-x-3">
+                    <button type="button" id="cancel-guest-modal" class="bg-stone-200 text-stone-700 font-bold py-2 px-4 rounded-lg hover:bg-stone-300">Cancelar</button>
+                    <button type="submit" class="bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-cyan-700">Salvar Convidado</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-modal" class="fixed inset-0 bg-black bg-opacity-50 z-30 hidden items-center justify-center p-4 modal-backdrop">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-sm p-6 modal-content scale-95">
+            <h2 class="text-xl font-bold mb-2">Confirmar Exclusão</h2>
+            <p id="delete-modal-text" class="text-stone-700 mb-4"></p>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button type="button" id="cancel-delete-btn" class="bg-stone-200 text-stone-700 font-bold py-2 px-4 rounded-lg hover:bg-stone-300">Cancelar</button>
+                <button type="button" id="confirm-delete-btn" class="bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700">Confirmar</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+
+            let events = [
+                { id: 1, name: "Show de MPB Acústico", date: "2025-10-15T19:00", location: "Teatro", status: "ATIVO", courtesyLimit: 50 },
+                { id: 2, name: "Exposição de Artes Plásticas", date: "2025-11-05T10:00", location: "Área de Convivência", status: "ATIVO", courtesyLimit: 100 },
+                { id: 3, name: "Peça Teatral 'O Auto da Compadecida'", date: "2025-09-28T20:30", location: "Teatro", status: "FINALIZADO", courtesyLimit: 80 },
+                { id: 4, name: "Oficina de Fotografia", date: "2025-10-22T14:00", location: "Sala de Oficinas", status: "CANCELADO", courtesyLimit: 20 },
+            ];
+            let guests = [
+                { id: 101, eventId: 1, name: "Carlos Drummond de Andrade", cpf: "123.456.789-00", email: "carlos.d@email.com" },
+                { id: 102, eventId: 1, name: "Cecília Meireles", cpf: "234.567.890-11", email: "cecilia.m@email.com" },
+                { id: 103, eventId: 2, name: "Tarsila do Amaral", cpf: "345.678.901-22", email: "tarsila.a@email.com" },
+                { id: 104, eventId: 3, name: "Ariano Suassuna", cpf: "456.789.012-33", email: "ariano.s@email.com" },
+                { id: 105, eventId: 3, name: "Graciliano Ramos", cpf: "567.890.123-44", email: "graciliano.r@email.com" },
+            ];
+            
+            let currentView = 'dashboard';
+            let selectedEventId = null;
+            let eventsChart = null;
+            
+            const views = document.querySelectorAll('.view');
+            const navLinks = document.querySelectorAll('.nav-link');
+            const mobileNav = document.getElementById('mobile-nav');
+
+            const eventModal = document.getElementById('event-modal');
+            const guestModal = document.getElementById('guest-modal');
+            const deleteModal = document.getElementById('delete-modal');
+            const editStatusModal = document.getElementById('edit-status-modal');
+
+            let eventIdToDelete = null;
+
+            const switchView = (viewName) => {
+                currentView = viewName;
+                views.forEach(v => v.classList.add('hidden'));
+                document.getElementById(`${viewName}-view`).classList.remove('hidden');
+
+                navLinks.forEach(link => {
+                    if (link.dataset.view === viewName) {
+                        link.classList.add('bg-orange-100', 'text-orange-700');
+                        link.classList.remove('text-stone-600', 'hover:bg-stone-100');
+                    } else {
+                        link.classList.remove('bg-orange-100', 'text-orange-700');
+                        link.classList.add('text-stone-600', 'hover:bg-stone-100');
+                    }
+                });
+                mobileNav.value = viewName;
+                updateUI();
+            };
+
+            navLinks.forEach(link => {
+                link.addEventListener('click', () => switchView(link.dataset.view));
+            });
+            mobileNav.addEventListener('change', (e) => switchView(e.target.value));
+
+            const openModal = (modal) => {
+                const modalContent = modal.querySelector('.modal-content');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => {
+                   modal.classList.add('opacity-100');
+                   modalContent.classList.remove('scale-95');
+                }, 10);
+            }
+
+            const closeModal = (modal) => {
+                const modalContent = modal.querySelector('.modal-content');
+                modal.classList.remove('opacity-100');
+                modalContent.classList.add('scale-95');
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                }, 300);
+            }
+
+            document.getElementById('add-event-btn').addEventListener('click', () => openModal(eventModal));
+            
+            // Listeners for event modal buttons
+            document.getElementById('cancel-event-modal').addEventListener('click', (e) => {
+                e.preventDefault(); // Prevents form submission if it's a button inside a form
+                closeModal(eventModal);
+            });
+            
+            document.getElementById('event-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const eventDate = document.getElementById('eventDate').value;
+                const eventTime = document.getElementById('eventTime').value;
+
+                const newEvent = {
+                    id: Date.now(),
+                    name: document.getElementById('eventName').value,
+                    // Armazena a data e a hora como uma string de horário local, sem fuso horário
+                    date: `${eventDate}T${eventTime}`,
+                    location: document.getElementById('eventLocation').value,
+                    status: document.getElementById('eventStatusSelect').value,
+                    courtesyLimit: parseInt(document.getElementById('eventCourtesiesLimit').value)
+                };
+                events.push(newEvent);
+                e.target.reset();
+                closeModal(eventModal);
+                updateUI();
+            });
+
+            document.getElementById('add-guest-btn').addEventListener('click', () => {
+                document.getElementById('guestEventId').value = selectedEventId;
+                openModal(guestModal);
+            });
+            document.getElementById('cancel-guest-modal').addEventListener('click', () => closeModal(guestModal));
+
+            document.getElementById('cancel-edit-status-modal').addEventListener('click', () => closeModal(editStatusModal));
+            
+            document.getElementById('edit-status-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const eventId = parseInt(document.getElementById('editStatusEventId').value);
+                const newStatus = document.getElementById('editEventStatusSelect').value;
+                
+                const eventToUpdate = events.find(e => e.id === eventId);
+                if (eventToUpdate) {
+                    eventToUpdate.status = newStatus;
+                }
+                
+                closeModal(editStatusModal);
+                updateUI();
+            });
+
+            document.getElementById('confirm-delete-btn').addEventListener('click', () => {
+                deleteEvent(eventIdToDelete);
+                closeModal(deleteModal);
+            });
+
+            document.getElementById('cancel-delete-btn').addEventListener('click', () => {
+                closeModal(deleteModal);
+            });
+
+            const showDeleteConfirmation = (eventId) => {
+                const event = events.find(e => e.id === eventId);
+                if (!event) return;
+                eventIdToDelete = eventId;
+                document.getElementById('delete-modal-text').textContent = `Tem certeza que deseja excluir o evento "${event.name}" e todos os seus convidados? Esta ação é irreversível.`;
+                openModal(deleteModal);
+            };
+
+            const deleteEvent = (eventId) => {
+                events = events.filter(e => e.id !== eventId);
+                guests = guests.filter(g => g.eventId !== eventId);
+                if (selectedEventId === eventId) {
+                    selectedEventId = null;
+                }
+                updateUI();
+            };
+            
+            const openEditStatusModal = (eventId) => {
+                const event = events.find(e => e.id === eventId);
+                if (!event) return;
+                document.getElementById('editStatusEventId').value = eventId;
+                document.getElementById('editEventStatusSelect').value = event.status;
+                openModal(editStatusModal);
+            };
+
+            document.getElementById('guest-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const newGuest = {
+                    id: Date.now(),
+                    eventId: parseInt(document.getElementById('guestEventId').value),
+                    name: document.getElementById('guestName').value,
+                    cpf: document.getElementById('guestCPF').value,
+                    email: document.getElementById('guestEmail').value,
+                };
+                guests.push(newGuest);
+                e.target.reset();
+                closeModal(guestModal);
+                updateUI();
+            });
+
+            const renderDashboard = () => {
+                document.getElementById('total-events-stat').textContent = events.length;
+                document.getElementById('total-guests-stat').textContent = guests.length;
+                document.getElementById('active-events-stat').textContent = events.filter(e => e.status === 'ATIVO').length;
+                
+                // Check if the canvas element and Chart.js library are available
+                const chartCanvas = document.getElementById('eventsChart');
+                if (!chartCanvas || typeof Chart === 'undefined') {
+                    console.error('Canvas element or Chart.js library not found. Cannot render chart.');
+                    return;
+                }
+                
+                const ctx = chartCanvas.getContext('2d');
+                const eventGuestCounts = events.map(event => {
+                    return {
+                        name: event.name,
+                        count: guests.filter(g => g.eventId === event.id).length
+                    }
+                });
+
+                if (eventsChart) {
+                    eventsChart.destroy();
+                }
+
+                eventsChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: eventGuestCounts.map(e => e.name.length > 25 ? e.name.substring(0, 22) + '...' : e.name),
+                        datasets: [{
+                            label: 'Nº de Cortesias',
+                            data: eventGuestCounts.map(e => e.count),
+                            backgroundColor: 'rgba(234, 88, 12, 0.6)',
+                            borderColor: 'rgba(234, 88, 12, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true, ticks: { precision: 0 } }
+                        },
+                        plugins: { legend: { display: false } }
+                    }
+                });
+            };
+
+            const renderEventsList = () => {
+                const listContainer = document.getElementById('events-list');
+                listContainer.innerHTML = '';
+                if(events.length === 0) {
+                    listContainer.innerHTML = `<p class="text-center text-stone-500 p-4">Nenhum evento cadastrado.</p>`;
+                    return;
+                }
+                const sortedEvents = [...events].sort((a,b) => new Date(b.date) - new Date(a.date));
+                sortedEvents.forEach(event => {
+                    const isSelected = event.id === selectedEventId;
+                    const item = document.createElement('div');
+                    item.className = `p-3 rounded-lg cursor-pointer border flex justify-between items-center ${isSelected ? 'bg-orange-100 border-orange-300' : 'bg-white hover:bg-stone-50 border-stone-200'}`;
+                    // Converte a string de data local para o fuso horário de Brasília para exibição
+                    const formattedDate = new Date(event.date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' });
+                    item.innerHTML = `
+                        <div>
+                            <p class="font-semibold text-stone-800">${event.name}</p>
+                            <p class="text-sm text-stone-500">${formattedDate}</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button data-event-id="${event.id}" class="edit-status-btn text-orange-500 hover:text-orange-700 transition-colors">
+                                Editar Status
+                            </button>
+                            <button data-event-id="${event.id}" class="delete-event-btn text-red-500 hover:text-red-700 transition-colors">
+                                &#128465;
+                            </button>
+                        </div>
+                    `;
+                    item.querySelector('.delete-event-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        showDeleteConfirmation(event.id);
+                    });
+                     item.querySelector('.edit-status-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openEditStatusModal(event.id);
+                    });
+                    item.addEventListener('click', () => {
+                        selectedEventId = event.id;
+                        updateUI();
+                    });
+                    listContainer.appendChild(item);
+                });
+            };
+
+            const renderEventDetails = () => {
+                if (!selectedEventId) {
+                    document.getElementById('selected-event-details').classList.add('hidden');
+                    document.getElementById('no-event-selected').classList.remove('hidden');
+                    return;
+                }
+                
+                document.getElementById('selected-event-details').classList.remove('hidden');
+                document.getElementById('no-event-selected').classList.add('hidden');
+
+                const event = events.find(e => e.id === selectedEventId);
+                const eventGuests = guests.filter(g => g.eventId === selectedEventId);
+                
+                const statusClasses = {
+                    'ATIVO': 'bg-emerald-100 text-emerald-800',
+                    'FINALIZADO': 'bg-stone-200 text-stone-800',
+                    'CANCELADO': 'bg-red-100 text-red-800'
+                };
+
+                // Converte a string de data local para o fuso horário de Brasília para exibição
+                const formattedDate = new Date(event.date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' });
+
+                document.getElementById('event-title').textContent = event.name;
+                document.getElementById('event-date').textContent = formattedDate;
+                document.getElementById('event-location').textContent = event.location;
+                const statusEl = document.getElementById('event-status');
+                statusEl.textContent = event.status;
+                statusEl.className = `font-mono text-xs inline-block px-2 py-1 rounded ${statusClasses[event.status] || 'bg-stone-100'}`;
+
+                document.getElementById('event-courtesies').textContent = `${eventGuests.length} / ${event.courtesyLimit}`;
+                
+                const guestTableBody = document.getElementById('guests-table-body');
+                guestTableBody.innerHTML = '';
+                if(eventGuests.length === 0){
+                    guestTableBody.innerHTML = `<tr><td colspan="2" class="text-center text-stone-500 py-4">Nenhum convidado para este evento.</td></tr>`;
+                    return;
+                }
+                eventGuests.forEach(guest => {
+                    const row = guestTableBody.insertRow();
+                    row.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-stone-900">${guest.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-stone-500">${guest.email || '-'}</td>
+                    `;
+                });
+            };
+
+            const renderReports = () => {
+                const filter = document.getElementById('report-event-filter');
+                const selectedEvent = filter.value;
+                filter.innerHTML = '<option value="all">Todos os Eventos</option>';
+                events.forEach(event => {
+                    const option = document.createElement('option');
+                    option.value = event.id;
+                    option.textContent = event.name;
+                    filter.appendChild(option);
+                });
+                filter.value = selectedEvent || "all";
+
+                const tableBody = document.getElementById('report-table-body');
+                tableBody.innerHTML = '';
+
+                let filteredGuests = guests;
+                if(selectedEvent && selectedEvent !== 'all') {
+                    filteredGuests = guests.filter(g => g.eventId == selectedEvent);
+                }
+
+                if(filteredGuests.length === 0){
+                    tableBody.innerHTML = `<tr><td colspan="5" class="text-center text-stone-500 py-4">Nenhum dado encontrado.</td></tr>`;
+                    return;
+                }
+
+                filteredGuests.forEach(guest => {
+                    const event = events.find(e => e.id === guest.eventId);
+                    // Converte a string de data local para o fuso horário de Brasília para exibição
+                    const formattedDate = new Date(event.date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' });
+                    const row = tableBody.insertRow();
+                    row.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-stone-900">${event.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-stone-500">${formattedDate}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-stone-500">${guest.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-stone-500">${guest.cpf}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-stone-500">${guest.email}</td>
+                    `;
+                });
+            };
+
+            document.getElementById('report-event-filter').addEventListener('change', renderReports);
+
+            const exportToPDF = () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('l', 'pt', 'a4');
+                const table = document.getElementById('report-table');
+
+                // Add the title to the PDF
+                doc.setFontSize(16);
+                doc.text("Sesc Araraquara - Gestão de Cortesias - Secretaria Geral", doc.internal.pageSize.getWidth() / 2, 30, { align: 'center' });
+
+                // Renderiza a tabela HTML para o PDF
+                doc.html(table, {
+                    callback: function(pdf) {
+                        pdf.save('relatorio_cortesias.pdf');
+                    },
+                    x: 10,
+                    y: 45, // Adjusted y to make space for the title
+                    width: 800,
+                    windowWidth: 1000,
+                    html2canvas: {
+                        scale: 0.8,
+                        useCORS: true
+                    }
+                });
+            };
+
+            document.getElementById('export-pdf-btn').addEventListener('click', exportToPDF);
+
+            const updateUI = () => {
+                if (currentView === 'dashboard') {
+                    renderDashboard();
+                } else if (currentView === 'events') {
+                    renderEventsList();
+                    renderEventDetails();
+                } else if (currentView === 'reports') {
+                    renderReports();
+                }
+            };
+            
+            switchView('dashboard');
+        });
+    </script>
+</body>
+</html>
